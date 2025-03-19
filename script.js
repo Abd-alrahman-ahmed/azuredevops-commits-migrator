@@ -15,6 +15,10 @@ const ORG = process.env.ORG;
 
 const COMMITS_FOLDER_PATH = process.env.COMMITS_FOLDER_PATH ?? ".";
 
+const BRANCH = process.env.TRACKER_TARGET_BRANCH ?? "master";
+
+const AUTHOR_NAME = process.env.AZURE_AUTHOR_NAME;
+
 async function getProjects() {
   const url = `https://dev.azure.com/${ORG}/_apis/projects?api-version=7.1-preview.4`;
   let config = {
@@ -96,24 +100,39 @@ async function getCommits(project, repo, author, branch) {
   return allCommits;
 }
 
+function escapeSpecialChars(str) {
+  let specialChars = [`&`, `|`, `>`, `<`, `"`, `'`, `\\`, `$`];
+  
+  // Use regex to escape each special character
+  let escapedStr = str.replace(
+    new RegExp(`[${specialChars.map(c => `\\${c}`).join('')}]`, 'g'),
+    match => `\\${match}`
+  );
+
+  return escapedStr;
+}
+
 
 async function generateGitCommits(commits) {
   if (!commits.length) return;
   let i = 1;
   log("commiting to: ", COMMITS_FOLDER_PATH);
   for (const commit of commits) {
+    let commitComment = escapeSpecialChars(commit.comment);
     let formattedDate = moment(commit.creationDate).format('YYYY-MM-DD HH:MM:SS');
-    const text = `### _${formattedDate}_ **${commit.comment}** ([link](${commit.remoteUrl}))\n\n`
+    const text = `### _${formattedDate}_ **${commitComment}** ([link](${commit.remoteUrl}))\n\n`
     fs.appendFileSync(`${COMMITS_FOLDER_PATH}/README.md`, text, { flag: 'a+' });
     await execAsync(`cd ${COMMITS_FOLDER_PATH} && git add README.md`);
     await execAsync(`set GIT_COMMITTER_DATE='${formattedDate}'`);
     await execAsync(`set GIT_AUTHOR_DATE='${formattedDate}'`);
-    await execAsync(`cd ${COMMITS_FOLDER_PATH} && git commit -m "${commit.comment}" --date "${formattedDate}"`);
+    await execAsync(`cd ${COMMITS_FOLDER_PATH} && git commit -m "${commitComment}" --date "${formattedDate}"`);
     console.log(`${i}/${commits.length}`);
     i++;
   }
+  let result = await execAsync(`cd ${COMMITS_FOLDER_PATH} && git log`);
+  log(`Branch log`, result.stdout, result.stderr);
   log(`committed all ${commits.length} commits`);
-  await execAsync(`cd ${COMMITS_FOLDER_PATH} && git push origin master`);
+  await execAsync(`cd ${COMMITS_FOLDER_PATH} && git push origin ${BRANCH}`);
 
 }
 
@@ -123,7 +142,7 @@ async function main() {
   for (let project of projects) {
     let repositories = await getRepositories(project);
     for (let repo of repositories) {
-      let commits = await getCommits(project, repo.name, "Raamyy", repo.defaultBranch);
+      let commits = await getCommits(project, repo.name, AUTHOR_NAME, repo.defaultBranch);
       COMMITS = COMMITS.concat(commits);
     }
   }
